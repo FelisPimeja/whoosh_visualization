@@ -1,0 +1,529 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Визуализация поездок</title>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <script src="https://unpkg.com/maplibre-gl@2.4.0/dist/maplibre-gl.js"></script>
+    <link href="https://unpkg.com/maplibre-gl@2.4.0/dist/maplibre-gl.css" rel="stylesheet">
+    <link rel="apple-touch-icon" sizes="180x180" href="/apple-touch-icon.png">
+    <link rel="icon" type="image/png" sizes="32x32" href="/favicon-32x32.png">
+    <link rel="icon" type="image/png" sizes="16x16" href="/favicon-16x16.png">
+    <link rel="manifest" href="/site.webmanifest">
+    <style>
+        body { margin: 0; padding: 0; }
+        #map { position: absolute; top: 0; bottom: 0; width: 100%; }
+        .map-controls {
+            position: absolute;
+            top: 10px;
+            right: 10px;
+            z-index: 1;
+            background: white;
+            padding: 10px;
+            border-radius: 5px;
+            box-shadow: 0 0 10px rgba(0,0,0,0.2);
+            max-width: 300px;
+            max-height: 90vh;
+            overflow-y: auto;
+        }
+        .time-slider { width: 100%; margin: 10px 0; }
+        select, .layer-selector {
+            width: 100%;
+            padding: 5px;
+            margin-bottom: 10px;
+            border-radius: 3px;
+            border: 1px solid #ddd;
+        }
+        .legend {
+            margin-top: 10px;
+            padding: 10px;
+            background: white;
+            border-radius: 3px;
+        }
+        .legend-item {
+            display: flex;
+            align-items: center;
+            margin-bottom: 5px;
+        }
+        .legend-color {
+            width: 20px;
+            height: 10px;
+            margin-right: 5px;
+            display: inline-block;
+        }
+        .maplibregl-ctrl-top-left {
+            top: 10px;
+            left: 10px;
+            right: auto;
+        }
+
+        .maplibregl-ctrl-bottom-left {
+            bottom: 10px;
+            left: 10px;
+            right: auto;
+        }
+    </style>
+</head>
+<body>
+    <div id="map"></div>
+    <div class="map-controls">
+        <h3>Поездки</h3>
+        <select id="layer-selector" class="layer-selector">
+            <option value="routes">Маршруты поездок</option>
+            <option value="usage">Востребованность дорог</option>
+            <option value="speed">Средняя скорость</option>
+            <option value="clusters">Популярные места</option>
+    </select>
+        <div id="time-controls">
+            <label>Время суток: <span id="time-value">12:00</span></label>
+            <input type="range" id="time-filter" class="time-slider" min="0" max="23" value="12">
+        </div>
+        <select id="city-selector">
+            <option value="">Выберите город</option>
+        </select>
+        <div id="trip-count">Загрузка данных...</div>
+        <div id="usage-legend" class="legend" style="display: none;">
+            <h4>Востребованность дорог (поездок/день)</h4>
+            <div class="legend-item"><span class="legend-color" style="background: #ffeb3b;"></span> 10-25</div>
+            <div class="legend-item"><span class="legend-color" style="background: #ffc107;"></span> 25-50</div>
+            <div class="legend-item"><span class="legend-color" style="background: #ff9800;"></span> 50-200</div>
+            <div class="legend-item"><span class="legend-color" style="background: #f44336;"></span> 200+</div>
+            <div class="legend-item"><span class="legend-color" style="background: #cccccc;"></span> Нет данных</div>
+        </div>
+        <div id="speed-legend" class="legend" style="display: none;">
+            <h4>Средняя скорость на участке(км/ч)</h4>
+            <div class="legend-item"><span class="legend-color" style="background: #4caf50;"></span> 4-6</div>
+            <div class="legend-item"><span class="legend-color" style="background: #8bc34a;"></span> 6-8</div>
+            <div class="legend-item"><span class="legend-color" style="background: #cddc39;"></span> 8-12</div>
+            <div class="legend-item"><span class="legend-color" style="background: #ffc107;"></span> 10-16</div>
+            <div class="legend-item"><span class="legend-color" style="background: #f44336;"></span> 16+</div>
+            <div class="legend-item"><span class="legend-color" style="background: #cccccc;"></span> Нет данных</div>
+        </div>
+        <div id="clusters-legend" class="legend" style="display: block;">
+            <h4>Типы точек</h4>
+            <div class="legend-item">
+                <span class="legend-color" style="background: #4285F4; border-radius: 50%; width: 10px; height: 10px;"></span>
+                Точки старта поездок
+            </div>
+            <div class="legend-item">
+                <span class="legend-color" style="background: #EA4335; border-radius: 50%; width: 10px; height: 10px;"></span>
+                Точки финиша поездок
+            </div>
+        </div>
+    </div>
+
+    <script type="module">
+
+        function getBrowserLanguage() {
+            return navigator.language || navigator.userLanguage || 'en';
+        }
+
+        // Пример: получаем 2-буквенный код языка ('ru', 'en' и т.д.)
+        const userLang = getBrowserLanguage().split('-')[0];
+
+        // Импортируем стили из отдельного файла
+        import { 
+            routeLayerStyle, 
+            roadsUsageStyle, 
+            roadsSpeedStyle,
+            clustersLayerStyle,
+            mapStyle 
+        } from './js/map-style.js';
+
+     
+        // Инициализация карты
+        const key = 'QOROh6TWkzoMUDJzqknO';
+        const map = new maplibregl.Map({
+            container: 'map',
+            style: `${mapStyle}?key=${key}`,
+            center: [37.618423, 55.751244],
+            zoom: 10
+        });
+
+        // Добавляем навигационные элементы
+        map.addControl(new maplibregl.NavigationControl(), 'top-left');
+        map.addControl(new maplibregl.ScaleControl());
+
+        // Переменные состояния
+        let currentHour = 12;
+        let currentLayer = 'routes';
+        const timeFilter = document.getElementById('time-filter');
+        const timeValue = document.getElementById('time-value');
+        const tripCount = document.getElementById('trip-count');
+        const citySelector = document.getElementById('city-selector');
+        const layerSelector = document.getElementById('layer-selector');
+        const timeControls = document.getElementById('time-controls');
+        const usageLegend = document.getElementById('usage-legend');
+        const speedLegend = document.getElementById('speed-legend');
+        let citiesData;
+
+        // Загрузка данных городов
+        async function loadCities() {
+            const response = await fetch('./data/cities.json');
+            return await response.json();
+        }
+
+        // Поиск города по ID
+        function findCityById(cityId) {
+            for (const group of citiesData.groups) {
+                const city = group.cities.find(c => c.id === cityId);
+                if (city) return city;
+            }
+            return null;
+        }
+
+        // Сохранение состояния
+        function saveMapState() {
+            const center = map.getCenter();
+            const zoom = map.getZoom();
+            localStorage.setItem('mapState', JSON.stringify({
+                cityId: citySelector.value,
+                layer: layerSelector.value,
+                hour: timeFilter.value,
+                center: [center.lng, center.lat],
+                zoom: zoom
+            }));
+        }
+
+        // Восстановление состояния
+        function restoreMapState() {
+            const savedState = localStorage.getItem('mapState');
+            if (savedState) {
+                const { cityId, layer, hour, center, zoom } = JSON.parse(savedState);
+                
+                // Восстанавливаем UI элементы
+                if (cityId) citySelector.value = cityId;
+                if (layer) {
+                    layerSelector.value = layer;
+                    setActiveLayer(layer);
+                }
+                if (hour) {
+                    timeFilter.value = hour;
+                    timeValue.textContent = hour.toString().padStart(2, '0') + ':00';
+                    currentHour = parseInt(hour);
+                }
+
+                // Ждем полной загрузки карты
+                map.once('idle', () => {
+                    // Восстанавливаем позицию карты
+                    if (center && zoom) {
+                        map.jumpTo({
+                            center: center,
+                            zoom: zoom
+                        });
+                    }
+                    
+                    // Если был выбран город - летим к нему
+                    if (cityId) {
+                        const city = findCityById(cityId);
+                        if (city) {
+                            setTimeout(() => {
+                                map.fitBounds(city.bounds, {
+                                    padding: {top: 50, bottom: 50, left: 50, right: 50},
+                                    speed: 0
+                                });
+                            }, 500);
+                        }
+                    }
+                    
+                    updateRouteFilter();
+                });
+            }
+        }
+
+        // Обработчики изменений
+        citySelector.addEventListener('change', function(e) {
+            const city = e.target.value;
+            if (city) {
+                flyToCity(city);
+            }
+            saveMapState();
+        });
+
+        layerSelector.addEventListener('change', function(e) {
+            setActiveLayer(e.target.value);
+            saveMapState();
+        });
+
+        timeFilter.addEventListener('input', function(e) {
+            currentHour = parseInt(e.target.value);
+            timeValue.textContent = currentHour.toString().padStart(2, '0') + ':00';
+            updateRouteFilter();
+            saveMapState();
+        });
+
+        // Сохраняем состояние при перемещении карты
+        map.on('moveend', saveMapState);
+        map.on('zoomend', saveMapState);
+
+        // Плавный переход к городу
+        function flyToCity(cityId) {
+            const city = findCityById(cityId);
+            if (city) {
+                map.fitBounds(city.bounds, {
+                    padding: {top: 50, bottom: 50, left: 50, right: 50},
+                    speed: 0.5,
+                    essential: true
+                });
+            }
+        }
+
+        // Переключение слоёв
+        function setActiveLayer(layer) {
+            currentLayer = layer;
+            
+            // Управление видимостью элементов интерфейса
+            timeControls.style.display = layer === 'routes' ? 'block' : 'none';
+            usageLegend.style.display = layer === 'usage' ? 'block' : 'none';
+            speedLegend.style.display = layer === 'speed' ? 'block' : 'none';
+            document.getElementById('clusters-legend').style.display = layer === 'clusters' ? 'block' : 'none';
+            
+            // Управление видимостью слоёв
+            const layers = {
+                'routes': 'routes',
+                'usage': 'roads-usage',
+                'speed': 'roads-speed',
+                'clusters': 'clusters'
+            };
+            
+            // Сначала скрываем все слои
+            Object.values(layers).forEach(layerId => {
+                if (map.getLayer(layerId)) {
+                    map.setLayoutProperty(layerId, 'visibility', 'none');
+                }
+            });
+            
+            // Показываем только выбранный слой
+            if (layers[layer] && map.getLayer(layers[layer])) {
+                map.setLayoutProperty(layers[layer], 'visibility', 'visible');
+            }
+            
+            // Обновляем счётчик поездок (если нужно)
+            updateTripCount();
+        }
+
+        // Инициализация городов
+        async function initCities() {
+            citiesData = await loadCities();
+            
+            citiesData.groups.forEach(group => {
+                const optgroup = document.createElement('optgroup');
+                optgroup.label = group.name;
+                
+                group.cities.forEach(city => {
+                    const option = document.createElement('option');
+                    option.value = city.id;
+                    option.textContent = city.name;
+                    optgroup.appendChild(option);
+                });
+                
+                citySelector.appendChild(optgroup);
+            });
+        }
+
+        // Обработчики событий
+        citySelector.addEventListener('change', function(e) {
+            const city = e.target.value;
+            if (city) {
+                flyToCity(city);
+                saveMapState(city);
+            }
+        });
+
+        timeFilter.addEventListener('input', function(e) {
+            currentHour = parseInt(e.target.value);
+            timeValue.textContent = currentHour.toString().padStart(2, '0') + ':00';
+            updateRouteFilter();
+        });
+
+        layerSelector.addEventListener('change', function(e) {
+            setActiveLayer(e.target.value);
+        });
+
+        // Обновление фильтра маршрутов
+        function updateRouteFilter() {
+            if (map.getLayer('routes')) {
+                map.setFilter('routes', [
+                    'all',
+                    ['>=', ['get', 'hour'], currentHour - 2],
+                    ['<=', ['get', 'hour'], currentHour + 2]
+                ]);
+                updateTripCount();
+            }
+        }
+
+        // Обновление счетчика поездок
+        function updateTripCount() {
+            if (currentLayer === 'routes' && map.getSource('routes')) {
+                const features = map.querySourceFeatures('routes', {
+                    sourceLayer: 'routes_clean',
+                    filter: map.getFilter('routes')
+                });
+                tripCount.textContent = `Отображено поездок: ${features.length.toLocaleString()}`;
+            } 
+            else if (currentLayer === 'clusters' && map.getSource('clusters')) {
+                const features = map.querySourceFeatures('clusters', {
+                    sourceLayer: 'clusters'
+                });
+                const totalTrips = features.reduce((sum, feature) => sum + (feature.properties.trip_count || 0), 0);
+                tripCount.textContent = `Всего поездок в точках: ${totalTrips.toLocaleString()}`;
+            }
+            else {
+                tripCount.textContent = '';
+            }
+        }
+
+        // Добавляем слой с маршрутами после загрузки карты
+        map.on('load', async function() {
+            await initCities();
+            
+            // Добавляем источники данных и слои
+            map.addSource('routes', {
+                type: 'vector',
+                url: `http://localhost:3000/routes_simplified`,
+                promoteId: 'trip_id'
+            });
+
+            map.addSource('roads-stat', {
+                type: 'vector',
+                url: `http://localhost:3000/roads_stat`,
+                promoteId: 'segment_id'
+            });
+
+            // map.addSource('trip-stat', {
+            //     type: 'vector',
+            //     url: `http://localhost:3000/get_trip_stat_by_zoom`,
+            //     promoteId: 'cluster_id'
+            // });
+
+            map.addSource('clusters', {
+                type: 'vector',
+                url: 'http://localhost:3000/clusters',
+                promoteId: 'cluster_id'
+            });
+
+            // Получаем ID всех слоёв базовой карты
+            const baseMapLayers = map.getStyle().layers;
+
+            // Находим первый слой с надписями
+            let firstLabelLayerId;
+            for (const layer of baseMapLayers) {
+                if (layer.type === 'symbol' && layer.id.includes('label')) {
+                    firstLabelLayerId = layer.id;
+                    break;
+                }
+            }
+
+            map.addLayer(routeLayerStyle, firstLabelLayerId);
+            map.addLayer(roadsUsageStyle, firstLabelLayerId);
+            map.addLayer(roadsSpeedStyle, firstLabelLayerId);
+            map.addLayer(clustersLayerStyle, firstLabelLayerId);
+            
+            // Восстанавливаем состояние после полной загрузки
+            restoreMapState();
+
+            // Интерактивные элементы для маршрутов
+            map.on('click', 'routes', function(e) {
+                if (e.features && e.features.length > 0) {
+                    new maplibregl.Popup()
+                        .setLngLat(e.lngLat)
+                        .setHTML(`
+                            <h4>Поездка #${e.features[0].properties.trip_id}</h4>
+                            <p>🕒 ${new Date(e.features[0].properties.started_at).toLocaleTimeString()} - 
+                            ${new Date(e.features[0].properties.finished_at).toLocaleTimeString()}</p>
+                        `)
+                        .addTo(map);
+                }
+            });
+
+            // Интерактивные элементы для дорожной статистики
+            map.on('click', ['roads-usage', 'roads-speed'], function(e) {
+                if (e.features && e.features.length > 0) {
+                    const props = e.features[0].properties;
+                    const content = currentLayer === 'usage' 
+                        ? `<h4>${props.name || 'Без названия'}</h4>
+                           <p>Количество поездок: ${props.trip_count || 0}</p>`
+                        : `<h4>${props.name || 'Без названия'}</h4>
+                           <p>Средняя скорость на участке: ${props.med_speed ? props.med_speed.toFixed(1) + ' км/ч' : 'нет данных'}</p>`;
+                    
+                    new maplibregl.Popup()
+                        .setLngLat(e.lngLat)
+                        .setHTML(content)
+                        .addTo(map);
+                }
+            });
+
+            map.on('click', 'clusters', function(e) {
+                const props = e.features[0].properties;
+                new maplibregl.Popup()
+                    .setLngLat(e.lngLat)
+                    .setHTML(`
+                        <div class="popup-content">
+                            <h4>${props.point_type === 'start' ? 'Точка начала' : 'Точка окончания'}</h4>
+                            <div class="popup-row">
+                                <span class="popup-label">Количество поездок:</span>
+                                <span class="popup-value">${props.trip_count}</span>
+                            </div>
+                            <div class="popup-row">
+                                <span class="popup-label">ID кластера:</span>
+                                <span class="popup-value">${props.cluster_id}</span>
+                            </div>
+                        </div>
+                    `)
+                    .addTo(map);
+            });
+
+
+            map.on('idle', function() {
+                if (currentLayer === 'clusters') {
+                    updateTripCount();
+                }
+            });
+
+
+            let hoveredClusterId = null;
+
+            map.on('mousemove', 'clusters', function(e) {
+                if (e.features.length > 0) {
+                    if (hoveredClusterId !== null) {
+                        map.setFeatureState(
+                            { source: 'clusters', sourceLayer: 'clusters', id: hoveredClusterId },
+                            { hover: false }
+                        );
+                    }
+                    
+                    hoveredClusterId = e.features[0].id;
+                    map.setFeatureState(
+                        { source: 'clusters', sourceLayer: 'clusters', id: hoveredClusterId },
+                        { hover: true }
+                    );
+                }
+            });
+
+            map.on('mouseleave', 'clusters', function() {
+                if (hoveredClusterId !== null) {
+                    map.setFeatureState(
+                        { source: 'clusters', sourceLayer: 'clusters', id: hoveredClusterId },
+                        { hover: false }
+                    );
+                }
+                hoveredClusterId = null;
+            });
+
+
+            // Изменение курсора при наведении
+            map.on('mouseenter', ['routes', 'roads-usage', 'roads-speed'], () => {
+                map.getCanvas().style.cursor = 'pointer';
+            });
+            
+            map.on('mouseleave', ['routes', 'roads-usage', 'roads-speed'], () => {
+                map.getCanvas().style.cursor = '';
+            });
+
+            updateRouteFilter();
+
+        });
+
+    </script>
+</body>
+</html>

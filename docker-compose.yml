@@ -1,0 +1,58 @@
+services:
+  db:
+    image: postgis/postgis:latest
+    env_file: .env
+    volumes:
+      - pg_data:/var/lib/postgresql/data
+      - ./init:/docker-entrypoint-initdb.d:ro
+    ports:
+      - "5433:5432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -d ${POSTGRES_DB} -U ${POSTGRES_USER}", "--quiet"]
+      interval: 1s
+      timeout: 5s
+      retries: 10
+  
+
+  csv:
+    image: alpine/curl 
+    volumes:
+      - ./data:/data:z 
+    command: sh -c "curl --skip-existing --dns-servers 8.8.8.8 -o ./data/routes.csv -L '${CSV_URL}'" # Download csv
+    depends_on:
+      db:
+        condition: service_healthy
+
+  data:
+    build: ./process_data
+    env_file: .env
+    environment:
+        - DATABASE_URL=postgresql://${POSTGRES_USER}:${POSTGRES_PASSWORD}@db/${POSTGRES_DB}
+    tty: true 
+    volumes:
+      - ./data:/data:z
+    depends_on:
+      csv:
+        condition: service_completed_successfully
+
+  martin:
+    image: maplibre/martin:latest
+    environment:
+      - DATABASE_URL=postgresql://${POSTGRES_USER}:${POSTGRES_PASSWORD}@db/${POSTGRES_DB}    
+    ports:
+      - "3000:3000"
+    depends_on:
+      data:
+        condition: service_completed_successfully
+
+  web:
+    image: nginx:alpine
+    ports:
+      - "80:80"
+    volumes:
+      - ./web:/usr/share/nginx/html:ro
+    depends_on:
+      - martin
+      
+volumes:
+  pg_data:

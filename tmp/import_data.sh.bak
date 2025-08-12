@@ -1,0 +1,60 @@
+#!/bin/bash
+
+# Параметры
+# DB_HOST="db"
+# DB_PORT="5432"
+DB_NAME="whoosh"
+DB_USER="user"
+DB_PASS="password"
+CSV_FILE="data/routes.csv"
+CSV_URL="https://drive.usercontent.google.com/download?id=1NFkmc6cUAgVOzmXwPxXFuv1mhVZMTOrS&confirm=t"
+TABLE_NAME="routes_raw"
+
+echo "Начало импорта данных из $CSV_FILE"
+
+# echo "Downloading routes.csv..."
+# curl -o ./data/routes.csv -L "https://drive.usercontent.google.com/download?id=1NFkmc6cUAgVOzmXwPxXFuv1mhVZMTOrS&confirm=t"
+
+
+# Импорт CSV
+psql "postgresql://$DB_USER:$DB_PASS@$DB_HOST:$DB_PORT/$DB_NAME" <<EOF
+CREATE TABLE IF NOT EXISTS $TABLE_NAME (
+    trip_id TEXT,
+    path TEXT,
+    started_at TIMESTAMP,
+    finished_at TIMESTAMP
+);
+
+\COPY $TABLE_NAME FROM '/data/routes.csv' WITH (FORMAT CSV, HEADER true);
+EOF
+
+echo "Импорт завершен. Таблица $TABLE_NAME создана."
+
+
+psql "postgresql://$DB_USER:$DB_PASS@$DB_HOST:$DB_PORT/$DB_NAME" <<EOF
+
+create extension postgis; 
+
+drop table if exists routes; 
+create table routes as 
+--
+select trip_id, started_at, finished_at,
+	st_setsrid(
+	    st_makeline(
+	        st_point(
+	            (latlon ->> 'lng')::float,
+	            (latlon ->> 'lat')::float
+	        )
+	        order by idx
+	    ),
+	    4326
+	)::geometry(linestring, 4326) geom
+from (
+    select r.*, idx, latlon
+    from routes_raw r, json_array_elements(path::json -> 'coordinates') with ordinality as coord(latlon, idx)
+    where latlon::text !~* '\y0\.0\y' -- отфильтровываем 0.0 координаты как заведомый мусор
+) coords
+group by trip_id, started_at, finished_at;
+
+create index on routes using gist(geom);
+EOF

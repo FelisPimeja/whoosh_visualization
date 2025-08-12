@@ -1,0 +1,167 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Визуализация поездок</title>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <script src="https://unpkg.com/maplibre-gl@2.4.0/dist/maplibre-gl.js"></script>
+    <link href="https://unpkg.com/maplibre-gl@2.4.0/dist/maplibre-gl.css" rel="stylesheet">
+    <style>
+        body { margin: 0; padding: 0; }
+        #map { position: absolute; top: 0; bottom: 0; width: 100%; }
+        .map-controls {
+            position: absolute;
+            top: 10px;
+            right: 10px;
+            z-index: 1;
+            background: white;
+            padding: 10px;
+            border-radius: 5px;
+            box-shadow: 0 0 10px rgba(0,0,0,0.2);
+            max-width: 300px;
+        }
+        .time-slider { width: 100%; margin: 10px 0; }
+    </style>
+</head>
+<body>
+    <div id="map"></div>
+    <div class="map-controls">
+        <h3>Поездки</h3>
+        <div>
+            <label>Время суток: <span id="time-value">12:00</span></label>
+            <input type="range" id="time-filter" class="time-slider" min="0" max="23" value="12">
+        </div>
+        <div id="trip-count">Загрузка данных...</div>
+    </div>
+
+    <script>
+        // Конфигурация стиля (basic-v2-light)
+        const lightStyle = {
+            version: 8,
+            sources: {
+                'maplibre-light': {
+                    type: 'vector',
+                    url: 'https://demotiles.maplibre.org/style.json'
+                }
+            },
+            layers: [{
+                id: 'background',
+                type: 'background',
+                paint: { 'background-color': '#f8f9fa' }
+            }]
+        };
+
+        // Инициализация карты с новым стилем
+        const key = 'QOROh6TWkzoMUDJzqknO';
+        const map = new maplibregl.Map({
+            container: 'map',
+            style: `https://api.maptiler.com/maps/dataviz-light/style.json?key=${key}`,
+            center: [37.618423, 55.751244],
+            zoom: 10
+        });
+
+        // Добавляем навигационные элементы
+        map.addControl(new maplibregl.NavigationControl());
+        map.addControl(new maplibregl.ScaleControl());
+
+        // Фильтр по времени
+        let currentHour = 12;
+        const timeFilter = document.getElementById('time-filter');
+        const timeValue = document.getElementById('time-value');
+        const tripCount = document.getElementById('trip-count');
+
+        timeFilter.addEventListener('input', function(e) {
+            currentHour = parseInt(e.target.value);
+            timeValue.textContent = currentHour.toString().padStart(2, '0') + ':00';
+            updateRouteFilter();
+        });
+
+        // Добавляем слой с маршрутами после загрузки карты
+        map.on('load', function() {
+            // Добавляем источник данных маршрутов
+            map.addSource('routes_clean', {
+                type: 'vector',
+                url: `http://localhost:3000/routes_clean`
+            });
+
+            map.addLayer({
+                id: 'routes_l',
+                type: 'line',
+                source: 'routes_clean',
+                'source-layer': 'routes_clean',
+                paint: {
+                    'line-color': 'red'
+                },
+            });
+
+
+            // Слой маршрутов с улучшенным стилем
+            // map.addLayer({
+            //     id: 'routes',
+            //     type: 'line',
+            //     source: 'routes',
+            //     'source-layer': 'routes',
+            //     paint: {
+            //         'line-color': [
+            //             'interpolate',
+            //             ['linear'],
+            //             ['hour', ['get', 'started_at']],
+            //             0, '#2c3e50',   // Ночь (темно-синий)
+            //             6, '#e74c3c',   // Утро (красный)
+            //             12, '#f39c12',  // День (оранжевый)
+            //             18, '#3498db',  // Вечер (синий)
+            //             23, '#2c3e50'   // Ночь
+            //         ],
+            //         'line-width': [
+            //             'interpolate',
+            //             ['linear'],
+            //             ['zoom'],
+            //             10, 1,
+            //             14, 3
+            //         ],
+            //         'line-opacity': 0.8,
+            //         'line-blur': 0.5
+            //     },
+            //     filter: ['all']
+            // });
+
+            // Интерактивные элементы
+            map.on('click', 'routes', function(e) {
+                new maplibregl.Popup()
+                    .setLngLat(e.lngLat)
+                    .setHTML(`
+                        <h4>Поездка #${e.features[0].properties.trip_id}</h4>
+                        <p>🕒 ${new Date(e.features[0].properties.started_at).toLocaleTimeString()} - 
+                        ${new Date(e.features[0].properties.finished_at).toLocaleTimeString()}</p>
+                    `)
+                    .addTo(map);
+            });
+
+            map.on('mouseenter', 'routes', () => map.getCanvas().style.cursor = 'pointer');
+            map.on('mouseleave', 'routes', () => map.getCanvas().style.cursor = '');
+
+            updateRouteFilter();
+        });
+
+        function updateRouteFilter() {
+            if (map.getSource('routes')) {
+                map.setFilter('routes', [
+                    'all',
+                    ['>=', ['hour', ['get', 'started_at']], currentHour - 2],
+                    ['<=', ['hour', ['get', 'started_at']], currentHour + 2]
+                ]);
+                updateTripCount();
+            }
+        }
+
+        function updateTripCount() {
+            if (map.getSource('routes')) {
+                const features = map.querySourceFeatures('routes', {
+                    filter: map.getFilter('routes')
+                });
+                tripCount.textContent = `Отображено поездок: ${features.length.toLocaleString()}`;
+            }
+        }
+    </script>
+</body>
+</html>

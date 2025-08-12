@@ -1,0 +1,8 @@
+drop table if exists raw_trips;
+
+create table routes_raw (
+  trip_id int8,
+  path jsonb,
+  started_at timestamp,
+  finished_at timestamp
+);

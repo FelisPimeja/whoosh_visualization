@@ -1,0 +1,1 @@
+psql -U user -d whoosh -c "select exists (select from pg_tables where schemaname = 'public' and tablename = 'routes');" || exit 1

@@ -1,0 +1,26 @@
+sources:
+  routes_postgis:
+    connection_string: "postgresql://user:password@db/whoosh"
+    tables:
+      routes:
+        srid: 4326
+        geometry_column: geometry
+        id_column: trip_id
+        properties:
+          started_at: datetime
+          finished_at: datetime
+        simplify: 
+          min_zoom: 5
+          max_zoom: 14
+          # tolerance: !expr "0.5 / (2^z)"
+        # Динамические стили
+        style:
+          color: |
+            match(
+              to_number(extract(hour from started_at)),
+              6 => '#FF0000',  # Утро
+              12 => '#00FF00', # День
+              18 => '#0000FF', # Вечер
+              '#AAAAAA'       # Ночь
+            )
+          width: 2

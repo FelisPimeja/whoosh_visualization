@@ -1,0 +1,6 @@
+# Data files
+/data/
+/tmp/
+
+# IDE
+.vscode/
