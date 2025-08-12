@@ -30,4 +30,4 @@ Martin нарезает их на векторные тайлы
 2. Run the services:
 
 ```bash
-docker-compose up -d db
+docker-compose up -d
