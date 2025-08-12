@@ -1,4 +1,0 @@
-#!/bin/bash
-set -e
-echo "Importing routes.csv..."
-psql -U "$POSTGRES_USER" -d "$POSTGRES_DB" -c "\copy routes_raw FROM '/docker-entrypoint-initdb.d/routes.csv' WITH CSV HEADER"
